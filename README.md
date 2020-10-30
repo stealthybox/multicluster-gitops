@@ -15,16 +15,17 @@ You can also configure Serf to bootstrap from some fixed IP's.
 A neat thing about this strategy is that it's declarative!
 Fork this repo and try it out :)
 
-### Requirements:
+## Requirements:
 1. your computer
 2. these tools
    - git
+   - hub (optional)
    - flux
    - docker
    - kind
    - kubectl
 
-### Let's go
+## Let's go
 ```shell
 hub clone stealthybox/multicluster-gitops
 cd multicluster-gitops
@@ -52,11 +53,11 @@ flux bootstrap github \
 alternatively, if you want to not use github & flux, apply the `kube-system` and `default` kustomizations to the proper clusters:
 ```shell
 for cl in cluster{0..2}; do
-  kubectl apply -k "./config/${cl}/default" -k "./config/${cl}/kube-system"
+  kubectl apply --context "kind-${cl}" -k "./config/${cl}/"{default,kube-system}
 done
 ```
 
-### Looking around
+## Looking around
 - Get the `Kustomization` resources the cluster0 flux-system uses to apply to the other clusters
 - Use the `kubectl --context` flag to switch between `kind-cluster0|1|2` on demand
 - Check that the serf and calico dameonsets and deploys become ready
@@ -66,7 +67,7 @@ done
 - Try curling the service from and to different clusters!
 
 
-### Tidying Up
+## Tidying Up
 ```shell
 kind/cleanup.sh
 ```

@@ -73,29 +73,35 @@ reconcile() {
     )"
   [ "${removed_peers}" ] && calicoctl delete bgppeers ${removed_peers}
   
-  echo "${bgp_peers}" | calicoctl apply -f -
+  if [ "${bgp_peers}" ]; then
+    echo "${bgp_peers}" | calicoctl apply -f -
+  fi
 
   # https://kube-router.io example  *(kube-router does not seem to dynamically update peers)
   # kubectl annotate node --all --overwrite=true "kube-router.io/peer.ips=${ip_csv}"
   # kubectl annotate node --all --overwrite=true "kube-router.io/peer.asns=${asn_csv}"
 
-  kubectl -n "${COREDNS_NS}" \
-    get configmap "${COREDNS_CM_ENV}" &>/dev/null \
-    ||  kubectl -n "${COREDNS_NS}" \
-        create configmap "${COREDNS_CM_ENV}"
-  kubectl -n "${COREDNS_NS}" \
-    patch configmap "${COREDNS_CM_ENV}" \
-    --type merge \
-    -p "$(echo {} | gojq '.data["EXTRA_KUBE_ZONES"]="'"${self_cluster}.lan"'"')"
+  if [ "${self_cluster}" ]; then
+    kubectl -n "${COREDNS_NS}" \
+      get configmap "${COREDNS_CM_ENV}" &>/dev/null \
+      ||  kubectl -n "${COREDNS_NS}" \
+          create configmap "${COREDNS_CM_ENV}"
+    kubectl -n "${COREDNS_NS}" \
+      patch configmap "${COREDNS_CM_ENV}" \
+      --type merge \
+      -p "$(echo {} | gojq '.data["EXTRA_KUBE_ZONES"]="'"${self_cluster}.lan"'"')"
+  fi
 
-  kubectl -n "${COREDNS_NS}" \
-    get configmap "${COREDNS_CM_CONFIGDIR}" &>/dev/null \
-    ||  kubectl -n "${COREDNS_NS}" \
-        create configmap "${COREDNS_CM_CONFIGDIR}"
-  kubectl -n "${COREDNS_NS}" \
-    patch configmap "${COREDNS_CM_CONFIGDIR}" \
-    --type merge \
-    -p "$(echo {} | gojq '.data["Corefile.multi-cluster"]="'"${corefile_mc}"'"')"
+  if [ "${corefile_mc}" ]; then
+    kubectl -n "${COREDNS_NS}" \
+      get configmap "${COREDNS_CM_CONFIGDIR}" &>/dev/null \
+      ||  kubectl -n "${COREDNS_NS}" \
+          create configmap "${COREDNS_CM_CONFIGDIR}"
+    kubectl -n "${COREDNS_NS}" \
+      patch configmap "${COREDNS_CM_CONFIGDIR}" \
+      --type merge \
+      -p "$(echo {} | gojq '.data["Corefile.multi-cluster"]="'"${corefile_mc}"'"')"
+  fi
 
   # free memory
   self_cluster=""
