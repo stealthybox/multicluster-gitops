@@ -1,0 +1,22 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: serf
+data:
+  discover.json: |
+    {
+      "discover": "multi-kube-serf"
+    }
+  # if our multiple clusters' nodes can multicast they will discover each other
+  # docker networks support multicast within the same network
+  tags.json: |
+    {
+      "tags" : {
+        "asn": "64512",
+        "cluster": "cluster2",
+        "dns": "10.102.0.10"
+      }
+    }
+
+# EXTERNAL_IP: 172.2.0.1

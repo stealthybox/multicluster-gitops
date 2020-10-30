@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: serf-node
+  labels:
+    app: serf-node
+spec:
+  selector:
+    matchLabels:
+      app: serf-node
+  template:
+    metadata:
+      labels:
+        app: serf-node
+    spec:
+      hostNetwork: true
+      priorityClassName: system-node-critical
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+        operator: Exists
+      - effect: NoSchedule
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+      containers:
+      - image: stealthybox/serf-kubectl-calicoctl:0.8.2_1.17.4_v3.13.1
+        name: serf
+        command:
+        - bash
+        - -c
+        - |
+          config_hash="$(cat /etc/serf/* | sha256sum)"
+          
+          serf agent --config-dir=/etc/serf/  &
+          pid=$!
+          function finish {
+            pkill sleep
+            kill -s INT $pid
+          }
+          trap finish EXIT
+
+          while sleep 10 & wait $!; do
+            new_config_hash="$(cat /etc/serf/* | sha256sum)"
+            if [[ "${config_hash}" != "${new_config_hash}" ]]; then
+              kill -s HUP "${pid}"
+            fi
+            config_hash="${new_config_hash}"
+          done
+        volumeMounts:
+        - name: config
+          mountPath: /etc/serf/
+        # TODO TCP probe not working as expected?  ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#configure-probes
+        # livenessProbe:
+        #   initialDelaySeconds: 10
+        #   tcpSocket:
+        #     host: 127.0.0.1
+        #     port: 7373 # serf-rpc
+        resources: {}
+      volumes:
+      - name: config
+        configMap:
+          name: serf

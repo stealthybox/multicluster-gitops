@@ -1,0 +1,17 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1beta1
+kind: Kustomization
+metadata:
+  name: cluster2-apply
+  namespace: flux-system
+spec:
+  interval: 1m0s
+  path: ./config/cluster2/
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  kubeConfig:
+    secretRef:
+      name: cluster2-kubeconfig
+  timeout: 2m

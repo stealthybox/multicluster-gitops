@@ -1,0 +1,16 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: calico-node
+  namespace: kube-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: calico-node
+        env:
+        - name: CALICO_ADVERTISE_CLUSTER_IPS
+          value: 10.102.0.0/19
+        - name: CALICO_IPV4POOL_IPIP
+          value: Never

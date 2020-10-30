@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: debug
+  labels:
+    app: debug
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: debug
+  template:
+    metadata:
+      labels:
+        app: debug
+    spec:
+      containers:
+      - image: stealthybox/debian-debug
+        name: debian-debug
+        command:
+        - sleep
+        - infinity
+        resources: {}
+status: {}

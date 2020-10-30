@@ -1,0 +1,197 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: serf-query
+  labels:
+    app: serf-query
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: serf-query
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: serf-query
+    spec:
+      hostNetwork: true
+      priorityClassName: system-cluster-critical  # not as important as node-critical 
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+        operator: Exists
+      - effect: NoSchedule
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+      serviceAccountName: serf-query
+      # The query service uses the serf member list to configure the inter-cluster BGP mesh and DNS servers.
+      # 
+      # It should run on a Node that is running a pod from the serf-node DaemonSet.
+      # Use scheduling constraints such as node-selector or inter-pod affinity to
+      # ensure this happens if serf-node is only scheduled to certain nodes.
+      #   (example: make serf-node and query pods only run on route-reflector nodes)
+      # 
+      # hostNetwork is used for talking to the serf DaemonSet instead of a ClusterIP
+      # because it removes a network dependency on CoreDNS.
+      # 
+      # A single replica Deployment is used instead of leader-election
+      containers:
+      - image: stealthybox/serf-kubectl-calicoctl:0.8.2_1.17.4_v3.13.1
+        name: query
+        securityContext:
+          runAsUser: 0 # used for debugging, otherwise unneeded
+        command:
+        - bash
+        - -c
+        - |
+          #!/usr/bin/env bash
+
+          COREDNS_NS="${COREDNS_NS:-"kube-system"}"
+          COREDNS_CM_CONFIGDIR="${COREDNS_CM_CONFIGDIR:-"coredns-configdir"}"
+          COREDNS_CM_ENV="${COREDNS_CM_ENV:-"coredns-env"}"
+          SYNC_PERIOD="${SYNC_PERIOD:-"10"}"
+
+          set -eu
+
+          old_hash=""
+          reconcile() {
+            self_cluster="$(
+              serf info --format json | gojq -r '.tags.cluster'
+              )"
+            members="$(
+              serf members --format json | gojq '[
+                .members[] | select( .status != "left" )
+                  | .tags + {name,ip:.addr|sub(":[0-9]*$";"")}
+              ] | sort_by(.name)'
+              )"
+            external_members="$(
+              echo "${members}" | gojq '.[] | select( .cluster != "'"${self_cluster}"'" )'
+              )"
+
+            hash="$(
+              printf "${self_cluster}\n${members}" | sha256sum
+              )"
+            if [ "${hash}" = "${old_hash}" ]; then
+              return # no changes, do nothing
+            fi
+            old_hash="${hash}"
+            
+            bgp_peers="$(
+              echo "${external_members}" | gojq --yaml-output '
+                {
+                  apiVersion: "projectcalico.org/v3",
+                  kind: "BGPPeer",
+                  metadata: {
+                    name: .name,
+                    labels: {
+                      serf: "true"
+                    }
+                  },
+                  spec: {
+                    peerIP: .ip,
+                    asNumber: .asn
+                  }
+                }'
+              )"
+            
+            corefile_mc="$(
+              echo "${external_members}" | gojq -sr '[ .[] |
+          "\(.cluster).lan:53 {
+            forward . \(.dns)
+          }"
+              ] | unique | .[]'
+              )"
+
+            removed_peers="$(
+              comm -23 \
+                <(kubectl get bgppeers -l serf --no-headers | awk '{print $1}' | sort -u) \
+                <(echo "${external_members}" | gojq -r '.name' | sort -u)
+              )"
+            [ "${removed_peers}" ] && calicoctl delete bgppeers ${removed_peers}
+            
+            echo "${bgp_peers}" | calicoctl apply -f -
+
+            # https://kube-router.io example  *(kube-router does not seem to dynamically update peers)
+            # kubectl annotate node --all --overwrite=true "kube-router.io/peer.ips=${ip_csv}"
+            # kubectl annotate node --all --overwrite=true "kube-router.io/peer.asns=${asn_csv}"
+
+            kubectl -n "${COREDNS_NS}" \
+              get configmap "${COREDNS_CM_ENV}" &>/dev/null \
+              ||  kubectl -n "${COREDNS_NS}" \
+                  create configmap "${COREDNS_CM_ENV}"
+            kubectl -n "${COREDNS_NS}" \
+              patch configmap "${COREDNS_CM_ENV}" \
+              --type merge \
+              -p "$(echo {} | gojq '.data["EXTRA_KUBE_ZONES"]="'"${self_cluster}.lan"'"')"
+
+            kubectl -n "${COREDNS_NS}" \
+              get configmap "${COREDNS_CM_CONFIGDIR}" &>/dev/null \
+              ||  kubectl -n "${COREDNS_NS}" \
+                  create configmap "${COREDNS_CM_CONFIGDIR}"
+            kubectl -n "${COREDNS_NS}" \
+              patch configmap "${COREDNS_CM_CONFIGDIR}" \
+              --type merge \
+              -p "$(echo {} | gojq '.data["Corefile.multi-cluster"]="'"${corefile_mc}"'"')"
+
+            # free memory
+            self_cluster=""
+            members=""
+            external_members=""
+            bgp_peers=""
+            corefile_mc=""
+            removed_peers=""
+          }
+
+          pause_loop() {
+            sleep "${SYNC_PERIOD}" || true
+          }
+
+          graceful_exit() {
+            echo "--- received interrupt ---"
+            job_ids="$(
+              jobs \
+                | grep "pause_loop" \
+                | tr [] " " \
+                | awk '{print "%" $1}'
+              )"
+            # shellcheck disable=SC2086
+            if [ "${job_ids}" ]; then
+              kill ${job_ids}
+            fi
+            wait
+            echo "< clean exit >"
+          }
+
+          trap graceful_exit INT TERM
+
+          while true; do
+            reconcile & wait $!
+            pause_loop & wait $!
+          done
+        env:
+        - name: DATASTORE_TYPE # for calicoctl
+          value: kubernetes
+        - name: COREDNS_NS
+          value: kube-system
+        - name: COREDNS_CM_CONFIGDIR
+          value: coredns-configdir
+        - name: COREDNS_CM_ENV
+          value: coredns-env
+        - name: SYNC_PERIOD
+          value: "10"
+        # TODO TCP probe not working as expected?  ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#configure-probes
+        # livenessProbe:
+        #   initialDelaySeconds: 10
+        #   failureThreshold: 6  # permissively check local serf-node access
+        #   tcpSocket:
+        #     host: 127.0.0.1
+        #     port: 7373 # serf-rpc on this Node's hostNetwork 
+        resources: {}
+      volumes:
+      - name: config
+        configMap:
+          name: serf-query

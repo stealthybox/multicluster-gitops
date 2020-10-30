@@ -1,0 +1,23 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coredns
+spec:
+  template:
+    spec:
+      containers:
+      - name: coredns
+        envFrom:
+        - configMapRef:
+            name: coredns-env
+            optional: true
+        volumeMounts:
+        - name: configdir
+          mountPath: /etc/coredns.d/
+          readOnly: true
+      volumes:
+      - name: configdir
+        configMap:
+          name: coredns-configdir
+          optional: true

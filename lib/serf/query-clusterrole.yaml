@@ -1,0 +1,48 @@
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: serf-query
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: serf-query
+subjects:
+- kind: ServiceAccount
+  name: serf-query
+  namespace: kube-system
+    # WARNING: if you change the kustomization namespace, make sure to patch this subject namespace
+    # TODO: this currently has to be hard-coded: https://github.com/kubernetes-sigs/kustomize/issues/136
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: serf-query
+rules:
+  - apiGroups:
+    - crd.projectcalico.org
+    resources:
+      - bgppeers
+    verbs:
+      - "*"
+  - apiGroups:
+    - ""
+    resources:
+      - nodes
+    verbs:
+      - list
+      - watch
+      - get
+      - patch
+      - update
+  - apiGroups:
+    - ""
+    resources:
+      - configmaps
+    verbs:
+      - list
+      - watch
+      - get
+      - create
+      - patch
+      - update
