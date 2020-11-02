@@ -1,4 +1,4 @@
-# multi-cluster meshing /w GitOps
+# multi-cluster mesh routing /w GitOps
 This demo will build you 3 clusters that will all
 share their routing information with each other and
 forward DNS for cross-cluster Services.
@@ -41,12 +41,13 @@ kind/load.sh
 kubectl apply --context kind-cluster0 -k ./config/cluster0/kube-system
 
 GITHUB_USER=stealthybox
-# set your own user if you're using your own fork
+# set your own user here to match your fork
 
 export GITHUB_TOKEN="<personal access token with repo and SSH key rights>"
 
 flux bootstrap github \
   --owner "${GITHUB_USER}" \
+  --personal \
   --repository "multicluster-gitops" \
   --path "./config/cluster0"
 ```
@@ -71,3 +72,9 @@ done
 ```shell
 kind/cleanup.sh
 ```
+
+____
+
+
+## More demos!
+Check out this next demo featuring Flux's GPG signature verification and remote-cluster management over Cluster API: [stealthybox/capi-flux-demo](https://github.com/stealthybox/capi-flux-demo) 
